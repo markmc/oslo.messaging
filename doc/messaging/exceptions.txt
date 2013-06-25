@@ -1,0 +1,98 @@
+In amqp._process_data():
+
+        try:
+            rval = self.proxy.dispatch(...)
+        except rpc_common.ClientException as e:
+            LOG.debug(_('Expected exception during message handling (%s)') %
+                      e._exc_info[1])
+            ctxt.reply(None, e._exc_info,
+                       connection_pool=self.connection_pool,
+                       log_failure=False)
+        except Exception:
+            # sys.exc_info() is deleted by LOG.exception().
+            exc_info = sys.exc_info()
+            LOG.error(_('Exception during message handling'),
+                      exc_info=exc_info)
+            ctxt.reply(None, exc_info, connection_pool=self.connection_pool)
+
+in reply()
+
+        if failure:
+            failure = rpc_common.serialize_remote_exception(failure,
+                                                            log_failure)
+
+        msg = {'result': reply, 'failure': failure}
+
+in rpc.common:
+
+ class ClientException(Exception):
+     """Encapsulates actual exception expected to be hit by a RPC proxy object.
+
+     Merely instantiating it records the current exception information, which
+     will be passed back to the RPC client without exceptional logging.
+     """
+     def __init__(self):
+         self._exc_info = sys.exc_info()
+
+
+ def client_exceptions(*exceptions):
+     """Decorator for manager methods that raise expected exceptions.
+
+     Marking a Manager method with this decorator allows the declaration
+     of expected exceptions that the RPC layer should not consider fatal,
+     and not log as if they were generated in a real error scenario. Note
+     that this will cause listed exceptions to be wrapped in a
+     ClientException, which is used internally by the RPC layer.
+     """
+     def outer(func):
+         def inner(*args, **kwargs):
+             try:
+                 return func(*args, **kwargs)
+             except Exception as e:
+                 if type(e) in exceptions:
+                     raise ClientException()
+                 else:
+                     raise
+         return inner
+     return outer
+
+
+then there's serialize_remote_exception() and deserialize_remote_exception():
+
+  - key thing is how to represent the exception in json
+  - representation is:
+      {
+        'class': cls_name,
+        'module': mod_name,
+        'message': unicode(ex),
+        'tb': traceback.format_exception(..),
+        'args': ex.args,
+        'kwargs': ex.kwargs
+      }
+  - optionally log the exception at error level on server side
+  - class and module names get postfixed with _Remote on the client side, so
+    server-side will strip these postfixes off if it is sending back an exception
+    which came from another server
+  - on the client side, we only allow certain exceptions to be instantiated:
+     cfg.ListOpt('allowed_rpc_exception_modules',
+         default=['openstack.common.exception',
+                  'nova.exception',
+                  'cinder.exception',
+                  'exceptions',
+                  ],
+         help='Modules of exceptions that are permitted to be recreated'
+              'upon receiving exception data from an rpc call.'),
+    this shouldn't be a configuration option, but instead something the
+    client passes via the API
+  - if an exception can't be deserialized, we just raise RemoteError instead
+  - remote postfix is _Remote
+
+summary:
+  - exceptions are sent back from server in json
+  - how the server logs the message is controlled by a decorator
+  - client will re-instantiate the exception, but postfix the class and module
+    with _Remote
+  - the client should be able to specify which modules it supports exceptions
+    from
+  - RemoteError is the default exception type
+
