@@ -1,6 +1,8 @@
 
 TODO:
 
+  - use @excutils.forever_retry_uncaught_exceptions
+
   - apps need to be able to register backwards compat aliases for
     entry point names
 

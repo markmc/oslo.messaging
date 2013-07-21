@@ -20,8 +20,6 @@ LOG = logging.getLogger('client')
 
 logging.basicConfig(level=logging.DEBUG)
 
-transport = messaging.get_transport(CONF, 'rabbit:///test')
-
 CONF()
 CONF.log_opt_values(LOG, logging.DEBUG)
 
@@ -34,6 +32,8 @@ class Client(object):
 
     def ping(self, ctxt):
         return self._client.call(ctxt, 'ping')
+
+transport = messaging.get_transport(CONF, 'rabbit:///test')
 
 client = Client(transport)
 client.ping({})

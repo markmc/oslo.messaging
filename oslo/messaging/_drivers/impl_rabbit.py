@@ -474,6 +474,8 @@ class Connection(object):
         self.connection = None
         self.reconnect()
 
+        self.info = {'do_consume': True}
+
     def _fetch_ssl_params(self):
         """Handles fetching what ssl params should be used for the connection
         (if any).
@@ -648,7 +650,8 @@ class Connection(object):
     def iterconsume(self, limit=None, timeout=None):
         """Return an iterator that will consume from all queues/consumers."""
 
-        info = {'do_consume': True}
+        # FIXME(markmc): we don't want to re-consume each time we poll()
+        # info = {'do_consume': True}
 
         def _error_callback(exc):
             if isinstance(exc, socket.timeout):
@@ -658,16 +661,16 @@ class Connection(object):
             else:
                 LOG.exception(_('Failed to consume message from queue: %s') %
                               str(exc))
-                info['do_consume'] = True
+                self.info['do_consume'] = True
 
         def _consume():
-            if info['do_consume']:
+            if self.info['do_consume']:
                 queues_head = self.consumers[:-1]  # not fanout.
                 queues_tail = self.consumers[-1]  # fanout
                 for queue in queues_head:
                     queue.consume(nowait=True)
                 queues_tail.consume(nowait=False)
-                info['do_consume'] = False
+                self.info['do_consume'] = False
             return self.connection.drain_events(timeout=timeout)
 
         for iteration in itertools.count(0):
@@ -879,6 +882,39 @@ rabbit_opts = [
 ]
 
 
+class RabbitIncomingMessage(base.IncomingMessage):
+
+    def reply(self, reply=None, failure=None):
+        LOG.info("reply")
+
+    def done(self):
+        LOG.info("done")
+
+
+class RabbitListener(base.Listener):
+
+    def __init__(self, driver, target, conn):
+        super(RabbitListener, self).__init__(driver, target)
+        self.conn = conn
+        self.msg_id_cache = rpc_amqp._MsgIdCache()
+        self.incoming = None
+
+    def __call__(self, message):
+        rpc_common._safe_log(LOG.debug, _('received %s'), message)
+        self.msg_id_cache.check_duplicate_message(message)
+        ctxt = rpc_amqp.unpack_context(self.conf, message)
+
+        self.incoming = RabbitIncomingMessage(self, ctxt, message)
+
+    def poll(self):
+        while True:
+            # FIXME(markmc): timeout?
+            self.conn.consume(limit=1)
+            if self.incoming:
+                return self.incoming
+            time.sleep(.05)
+
+
 class RabbitDriver(base.BaseDriver):
 
     def __init__(self, conf, url=None, default_exchange=None):
@@ -940,4 +976,15 @@ class RabbitDriver(base.BaseDriver):
         # FIXME(markmc): implement wait_for_reply
 
     def listen(self, target):
-        pass
+        # FIXME(markmc): check that topic.target and topic.server is set
+
+        conn = self._get_connection()
+
+        listener = RabbitListener(self, target, conn)
+
+        conn.declare_topic_consumer(target.topic, listener)
+        conn.declare_topic_consumer('%s.%s' % (target.topic, target.server),
+                                    listener)
+        conn.declare_fanout_consumer(target.topic, listener)
+
+        return listener
