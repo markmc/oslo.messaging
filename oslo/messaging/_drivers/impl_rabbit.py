@@ -929,8 +929,13 @@ class RabbitDriver(base.BaseDriver):
         conn = self._get_connection()
 
         # FIXME(markmc): check that target.topic is set
-        # FIXME(markmc): handle target.server, target.fanout
-        conn.topic_send(target.topic, msg, timeout=timeout)
+        if target.fanout:
+            conn.fanout_send(target.topic, msg)
+        else:
+            topic = target.topic
+            if target.server:
+                topic = '%s.%s' % (target.topic, target.server)
+            conn.topic_send(topic, msg, timeout=timeout)
 
         # FIXME(markmc): implement wait_for_reply
 
