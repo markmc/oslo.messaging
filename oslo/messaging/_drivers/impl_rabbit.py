@@ -890,6 +890,10 @@ class RabbitDriver(base.BaseDriver):
 
         self._default_exchange = urls.exchange_from_url(url, default_exchange)
 
+        # FIXME(markmc): temp hack
+        if self._default_exchange:
+            self.conf.set_override('control_exchange', self._default_exchange)
+
         self._connection = None
 
     def _get_connection(self):
