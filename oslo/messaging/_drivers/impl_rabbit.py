@@ -897,22 +897,22 @@ class RabbitListener(base.Listener):
         super(RabbitListener, self).__init__(driver, target)
         self.conn = conn
         self.msg_id_cache = rpc_amqp._MsgIdCache()
-        self.incoming = None
+        self.incoming = []
 
     def __call__(self, message):
         rpc_common._safe_log(LOG.debug, _('received %s'), message)
         self.msg_id_cache.check_duplicate_message(message)
         ctxt = rpc_amqp.unpack_context(self.conf, message)
 
-        self.incoming = RabbitIncomingMessage(self, ctxt, message)
+        self.incoming.append(RabbitIncomingMessage(self, ctxt, message))
 
     def poll(self):
         while True:
+            if self.incoming:
+                return self.incoming.pop(0)
+
             # FIXME(markmc): timeout?
             self.conn.consume(limit=1)
-            if self.incoming:
-                return self.incoming
-            time.sleep(.05)
 
 
 class RabbitDriver(base.BaseDriver):
