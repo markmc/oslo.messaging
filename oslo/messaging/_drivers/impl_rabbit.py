@@ -876,6 +876,9 @@ from oslo.messaging._drivers import base
 from oslo.messaging import _urls as urls
 
 rabbit_opts = [
+    cfg.IntOpt('rpc_conn_pool_size',
+               default=30,
+               help='Size of RPC connection pool'),
     cfg.BoolOpt('fake_rabbit',
                 default=False,
                 help='If passed, use a fake RabbitMQ provider'),
@@ -930,14 +933,15 @@ class RabbitDriver(base.BaseDriver):
         if self._default_exchange:
             self.conf.set_override('control_exchange', self._default_exchange)
 
-        self._connection = None
+        # FIXME(markmc): get connection params from URL in addition to conf
+        # FIXME(markmc): close connections
+        self._connection_pool = rpc_amqp.get_connection_pool(self.conf,
+                                                             Connection)
 
-    def _get_connection(self):
-        if not self._connection:
-            # FIXME(markmc): get params from URL
-            # FIXME(markmc) use a pool
-            self._connection = Connection(self.conf)
-        return self._connection
+    def _get_connection(self, pooled=True):
+        return rpc_amqp.ConnectionContext(self.conf,
+                                          self._connection_pool,
+                                          pooled=pooled)
 
     def send(self, target, ctxt, message,
              wait_for_reply=None, timeout=None, envelope=False):
@@ -962,23 +966,22 @@ class RabbitDriver(base.BaseDriver):
         # FIXME(markmc): handle envelope param
         msg = rpc_common.serialize_msg(msg)
 
-        conn = self._get_connection()
+        with self._get_connection() as conn:
+            # FIXME(markmc): check that target.topic is set
+            if target.fanout:
+                conn.fanout_send(target.topic, msg)
+            else:
+                topic = target.topic
+                if target.server:
+                    topic = '%s.%s' % (target.topic, target.server)
+                conn.topic_send(topic, msg, timeout=timeout)
 
-        # FIXME(markmc): check that target.topic is set
-        if target.fanout:
-            conn.fanout_send(target.topic, msg)
-        else:
-            topic = target.topic
-            if target.server:
-                topic = '%s.%s' % (target.topic, target.server)
-            conn.topic_send(topic, msg, timeout=timeout)
-
-        # FIXME(markmc): implement wait_for_reply
+            # FIXME(markmc): implement wait_for_reply
 
     def listen(self, target):
         # FIXME(markmc): check that topic.target and topic.server is set
 
-        conn = self._get_connection()
+        conn = self._get_connection(pooled=False)
 
         listener = RabbitListener(self, target, conn)
 

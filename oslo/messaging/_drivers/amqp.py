@@ -28,12 +28,11 @@ AMQP, but is deprecated and predates this code.
 import collections
 import inspect
 import sys
+import threading
 import uuid
 
 #from eventlet import greenpool
-#from eventlet import pools
 #from eventlet import queue
-#from eventlet import semaphore
 from oslo.config import cfg
 
 from oslo.messaging.openstack.common import excutils
@@ -42,6 +41,7 @@ from oslo.messaging.openstack.common.gettextutils import _  # noqa
 #from oslo.messaging.openstack.common import log as logging
 import logging
 from oslo.messaging._drivers import common as rpc_common
+from oslo.messaging._drivers import pool as pool
 
 
 amqp_opts = [
@@ -61,44 +61,42 @@ UNIQUE_ID = '_unique_id'
 LOG = logging.getLogger(__name__)
 
 
-# class Pool(pools.Pool):
-#     """Class that implements a Pool of Connections."""
-#     def __init__(self, conf, connection_cls, *args, **kwargs):
-#         self.connection_cls = connection_cls
-#         self.conf = conf
-#         kwargs.setdefault("max_size", self.conf.rpc_conn_pool_size)
-#         kwargs.setdefault("order_as_stack", True)
-#         super(Pool, self).__init__(*args, **kwargs)
-#         self.reply_proxy = None
-#
-#     # TODO(comstud): Timeout connections not used in a while
-#     def create(self):
-#         LOG.debug(_('Pool creating new connection'))
-#         return self.connection_cls(self.conf)
-#
-#     def empty(self):
-#         while self.free_items:
-#             self.get().close()
-#         # Force a new connection pool to be created.
-#         # Note that this was added due to failing unit test cases. The issue
-#         # is the above "while loop" gets all the cached connections from the
-#         # pool and closes them, but never returns them to the pool, a pool
-#         # leak. The unit tests hang waiting for an item to be returned to the
-#         # pool. The unit tests get here via the tearDown() method. In the run
-#         # time code, it gets here via cleanup() and only appears in service.py
-#         # just before doing a sys.exit(), so cleanup() only happens once and
-#         # the leakage is not a problem.
-#         self.connection_cls.pool = None
-#
-#
-# _pool_create_sem = semaphore.Semaphore()
+class ConnectionPool(pool.Pool):
+    """Class that implements a Pool of Connections."""
+    def __init__(self, conf, connection_cls):
+        self.connection_cls = connection_cls
+        self.conf = conf
+        super(ConnectionPool, self).__init__(max_size=self.conf.rpc_conn_pool_size)
+        self.reply_proxy = None
+
+    # TODO(comstud): Timeout connections not used in a while
+    def create(self):
+        LOG.debug(_('Pool creating new connection'))
+        return self.connection_cls(self.conf)
+
+    def empty(self):
+        for item in self.iter_free:
+            item.close()
+        # Force a new connection pool to be created.
+        # Note that this was added due to failing unit test cases. The issue
+        # is the above "while loop" gets all the cached connections from the
+        # pool and closes them, but never returns them to the pool, a pool
+        # leak. The unit tests hang waiting for an item to be returned to the
+        # pool. The unit tests get here via the tearDown() method. In the run
+        # time code, it gets here via cleanup() and only appears in service.py
+        # just before doing a sys.exit(), so cleanup() only happens once and
+        # the leakage is not a problem.
+        self.connection_cls.pool = None
+
+
+_pool_create_sem = threading.Lock()
 
 
 def get_connection_pool(conf, connection_cls):
     with _pool_create_sem:
         # Make sure only one thread tries to create the connection pool.
         if not connection_cls.pool:
-            connection_cls.pool = Pool(conf, connection_cls)
+            connection_cls.pool = ConnectionPool(conf, connection_cls)
     return connection_cls.pool
 
 
@@ -520,7 +518,7 @@ def create_connection(conf, new, connection_pool):
     return ConnectionContext(conf, connection_pool, pooled=not new)
 
 
-# _reply_proxy_create_sem = semaphore.Semaphore()
+_reply_proxy_create_sem = threading.Lock()
 
 
 def multicall(conf, context, topic, msg, timeout, connection_pool):
