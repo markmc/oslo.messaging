@@ -36,4 +36,4 @@ class Client(object):
 transport = messaging.get_transport(CONF, 'rabbit:///test')
 
 client = Client(transport)
-client.ping({})
+print client.ping({})
