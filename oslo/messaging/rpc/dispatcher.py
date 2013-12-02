@@ -23,6 +23,8 @@ __all__ = [
     'UnsupportedVersion',
 ]
 
+import logging
+
 import six
 
 from oslo.messaging import _utils as utils
@@ -30,6 +32,8 @@ from oslo.messaging import localcontext
 from oslo.messaging import serializer as msg_serializer
 from oslo.messaging import server as msg_server
 from oslo.messaging import target as msg_target
+
+_LOG = logging.getLogger(__name__)
 
 
 class RPCDispatcherError(msg_server.MessagingServerError):
@@ -96,7 +100,7 @@ class RPCDispatcher(object):
         endpoint_version = target.version or '1.0'
         return utils.version_is_compatible(endpoint_version, version)
 
-    def _dispatch(self, endpoint, method, ctxt, args):
+    def _invoke(self, endpoint, method, ctxt, args):
         ctxt = self.serializer.deserialize_context(ctxt)
         new_args = dict()
         for argname, arg in six.iteritems(args):
@@ -104,15 +108,7 @@ class RPCDispatcher(object):
         result = getattr(endpoint, method)(ctxt, **new_args)
         return self.serializer.serialize_entity(ctxt, result)
 
-    def __call__(self, ctxt, message):
-        """Dispatch an RPC message to the appropriate endpoint method.
-
-        :param ctxt: the request context
-        :type ctxt: dict
-        :param message: the message payload
-        :type message: dict
-        :raises: NoSuchMethod, UnsupportedVersion
-        """
+    def _dispatch(self, ctxt, message):
         method = message.get('method')
         args = message.get('args', {})
         namespace = message.get('namespace')
@@ -131,7 +127,7 @@ class RPCDispatcher(object):
             if hasattr(endpoint, method):
                 localcontext.set_local_context(ctxt)
                 try:
-                    return self._dispatch(endpoint, method, ctxt, args)
+                    return self._invoke(endpoint, method, ctxt, args)
                 finally:
                     localcontext.clear_local_context()
 
@@ -141,3 +137,27 @@ class RPCDispatcher(object):
             raise NoSuchMethod(method)
         else:
             raise UnsupportedVersion(version)
+
+    def __call__(self, incoming):
+        """Dispatch an RPC message to the appropriate endpoint method.
+
+        :param incoming: the incoming message to be dispatched
+        :type ctxt: IncomingMessage
+        :raises: NoSuchMethod, UnsupportedVersion
+        """
+        try:
+            incoming.reply(self._dispatch(incoming.ctxt, incoming.message))
+        except messaging.ExpectedException as e:
+            _LOG.debug('Expected exception during message handling (%s)' %
+                       e.exc_info[1])
+            incoming.reply(failure=e.exc_info, log_failure=False)
+        except Exception as e:
+            # sys.exc_info() is deleted by LOG.exception().
+            exc_info = sys.exc_info()
+            _LOG.error('Exception during message handling: %s', e,
+                       exc_info=exc_info)
+            incoming.reply(failure=exc_info)
+            # NOTE(dhellmann): Remove circular object reference
+            # between the current stack frame and the traceback in
+            # exc_info.
+            del exc_info

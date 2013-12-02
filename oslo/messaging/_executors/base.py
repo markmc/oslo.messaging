@@ -20,8 +20,6 @@ import six
 
 from oslo import messaging
 
-_LOG = logging.getLogger(__name__)
-
 
 @six.add_metaclass(abc.ABCMeta)
 class ExecutorBase(object):
@@ -30,24 +28,6 @@ class ExecutorBase(object):
         self.conf = conf
         self.listener = listener
         self.callback = callback
-
-    def _dispatch(self, incoming):
-        try:
-            incoming.reply(self.callback(incoming.ctxt, incoming.message))
-        except messaging.ExpectedException as e:
-            _LOG.debug('Expected exception during message handling (%s)' %
-                       e.exc_info[1])
-            incoming.reply(failure=e.exc_info, log_failure=False)
-        except Exception as e:
-            # sys.exc_info() is deleted by LOG.exception().
-            exc_info = sys.exc_info()
-            _LOG.error('Exception during message handling: %s', e,
-                       exc_info=exc_info)
-            incoming.reply(failure=exc_info)
-            # NOTE(dhellmann): Remove circular object reference
-            # between the current stack frame and the traceback in
-            # exc_info.
-            del exc_info
 
     @abc.abstractmethod
     def start(self):

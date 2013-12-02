@@ -55,14 +55,7 @@ class NotificationDispatcher(object):
     def _listen(self, transport):
         return transport._listen_for_notifications(self._targets_priorities)
 
-    def __call__(self, ctxt, message):
-        """Dispatch an RPC message to the appropriate endpoint method.
-
-        :param ctxt: the request context
-        :type ctxt: dict
-        :param message: the message payload
-        :type message: dict
-        """
+    def _dispatch(self, ctxt, message):
         ctxt = self.serializer.deserialize_context(ctxt)
 
         publisher_id = message.get('publisher_id')
@@ -81,3 +74,18 @@ class NotificationDispatcher(object):
                 callback(ctxt, publisher_id, event_type, payload)
             finally:
                 localcontext.clear_local_context()
+
+    def __call__(self, incoming):
+        """Dispatch a notification message to the appropriate endpoint method.
+
+        :param incoming: the incoming notification message
+        :type ctxt: IncomingMessage
+        """
+        try:
+            self._dispatch(incoming.ctxt, incoming.message)
+        except Exception:
+            # sys.exc_info() is deleted by LOG.exception().
+            exc_info = sys.exc_info()
+            LOG.error('Exception during message handling',
+                      exc_info=exc_info)
+

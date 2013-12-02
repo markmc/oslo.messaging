@@ -55,7 +55,7 @@ class EventletExecutor(base.ExecutorBase):
             try:
                 while True:
                     incoming = self.listener.poll()
-                    self._greenpool.spawn_n(self._dispatch, incoming)
+                    self._greenpool.spawn_n(self.callback, incoming)
             except greenlet.GreenletExit:
                 return
 
