@@ -17,6 +17,7 @@
 import itertools
 import logging
 
+from oslo import messaging
 from oslo.messaging import localcontext
 from oslo.messaging import serializer as msg_serializer
 
@@ -83,6 +84,9 @@ class NotificationDispatcher(object):
         """
         try:
             self._dispatch(incoming.ctxt, incoming.message)
+        except messaging.RequeueMessageException:
+            LOG.debug('Requeue exception during message handling')
+            raise
         except Exception:
             # sys.exc_info() is deleted by LOG.exception().
             exc_info = sys.exc_info()
@@ -91,5 +95,9 @@ class NotificationDispatcher(object):
 
     @contextlib.contextmanager
     def __call__(self, incoming):
-        yield lambda: self._dispatch_and_handle_error(incoming)
-        incoming.acknowledge()
+        try:
+            yield lambda: self._dispatch_and_handle_error(incoming)
+        except messaging.RequeueMessageException:
+            incoming.requeue()
+        else:
+            incoming.acknowledge()

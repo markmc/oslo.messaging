@@ -171,3 +171,24 @@ class TestNotifyListener(test_utils.BaseTestCase, ListenerSetupMixin):
             {}, 'testpublisher', 'an_event.start', 'test')
         endpoint2.info.assert_called_once_with(
             {}, 'testpublisher', 'an_event.start', 'test')
+
+    def test_requeue(self):
+        transport = messaging.get_transport(self.conf, url='fake:')
+        endpoint = mock.Mock()
+        endpoint.info = mock.Mock()
+
+        def side_effect_requeue(*args, **kwargs):
+            if endpoint.info.call_count == 1:
+                raise messaging.RequeueMessageException()
+
+        endpoint.info.side_effect = side_effect_requeue
+        listener_thread = self._setup_listener(transport,
+                                               [endpoint], 2)
+        notifier = self._setup_notifier(transport)
+        notifier.info({}, 'an_event.start', 'test')
+
+        self._stop_listener(listener_thread)
+
+        expected = [mock.call({}, 'testpublisher', 'an_event.start', 'test'),
+                    mock.call({}, 'testpublisher', 'an_event.start', 'test')]
+        self.assertEqual(endpoint.info.call_args_list, expected)

@@ -26,14 +26,24 @@ from oslo.messaging._drivers import base
 
 
 class FakeIncomingMessage(base.IncomingMessage):
-    def __init__(self, listener, ctxt, message, reply_q):
+    def __init__(self, listener, ctxt, message, topic, server, fanout,
+                 reply_q):
         super(FakeIncomingMessage, self).__init__(listener, ctxt, message)
+        self._topic = topic
+        self._server = server
+        self._fanout = fanout
         self._reply_q = reply_q
 
     def reply(self, reply=None, failure=None, log_failure=True):
         if self._reply_q:
             failure = failure[1] if failure else None
             self._reply_q.put((reply, failure))
+
+    def requeue(self):
+        self.listener._exchange.deliver_message(
+            self._topic, self.ctxt, self.message,
+            server=self._server, fanout=self._fanout,
+            reply_q=self._reply_q)
 
 
 class FakeListener(base.Listener):
@@ -46,9 +56,12 @@ class FakeListener(base.Listener):
     def poll(self):
         while True:
             for target in self._targets:
-                (ctxt, message, reply_q) = self._exchange.poll(target)
+                (ctxt, message, server, fanout, reply_q) = \
+                    self._exchange.poll(target)
                 if message is not None:
-                    message = FakeIncomingMessage(self, ctxt, message, reply_q)
+                    message = FakeIncomingMessage(self, ctxt, message,
+                                                  target.topic,
+                                                  server, fanout, reply_q)
                     message.acknowledge()
                     return message
             time.sleep(.05)
@@ -79,7 +92,7 @@ class FakeExchange(object):
             else:
                 queues = [self._get_topic_queue(topic)]
             for queue in queues:
-                queue.append((ctxt, message, reply_q))
+                queue.append((ctxt, message, server, fanout, reply_q))
 
     def poll(self, target):
         with self._queues_lock:
@@ -87,7 +100,7 @@ class FakeExchange(object):
                 queue = self._get_server_queue(target.topic, target.server)
             else:
                 queue = self._get_topic_queue(target.topic)
-            return queue.pop(0) if queue else (None, None, None)
+            return queue.pop(0) if queue else (None, None, None, None, None)
 
 
 class FakeDriver(base.BaseDriver):

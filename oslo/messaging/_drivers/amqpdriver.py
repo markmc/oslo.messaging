@@ -38,6 +38,7 @@ class AMQPIncomingMessage(base.IncomingMessage):
         self.msg_id = msg_id
         self.reply_q = reply_q
         self.acknowledge = message.acknowledge
+        self.requeue = message.requeue
 
     def _send_reply(self, conn, reply=None, failure=None,
                     ending=False, log_failure=True):

@@ -41,24 +41,39 @@ class TestDispatcher(test_utils.BaseTestCase):
         ('no_endpoints',
          dict(endpoints=[],
               endpoints_expect_calls=[],
-              priority='info')),
+              priority='info',
+              success=True, ex=None)),
         ('one_endpoints',
          dict(endpoints=[['warn']],
               endpoints_expect_calls=['warn'],
-              priority='warn')),
+              priority='warn',
+              success=True, ex=None)),
         ('two_endpoints_only_one_match',
          dict(endpoints=[['warn'], ['info']],
               endpoints_expect_calls=[None, 'info'],
-              priority='info')),
+              priority='info',
+              success=True, ex=None)),
         ('two_endpoints_both_match',
          dict(endpoints=[['debug', 'info'], ['info', 'debug']],
               endpoints_expect_calls=['debug', 'debug'],
-              priority='debug')),
+              priority='debug',
+              success=True, ex=None)),
+        ('requeue_exception',
+         dict(endpoints=[['debug', 'warn']],
+              endpoints_expect_calls=['debug'],
+              priority='debug', msg=notification_msg,
+              success=False, ex=messaging.RequeueMessageException)),
     ]
 
     def test_dispatcher(self):
-        endpoints = [mock.Mock(spec=endpoint_methods)
-                     for endpoint_methods in self.endpoints]
+        endpoints = []
+        for endpoint_methods in self.endpoints:
+            e = mock.Mock(spec=endpoint_methods)
+            endpoints.append(e)
+            if self.ex:
+                for m in endpoint_methods:
+                    getattr(e, m).side_effect = self.ex()
+
         msg = notification_msg.copy()
         msg['priority'] = self.priority
 
@@ -73,7 +88,16 @@ class TestDispatcher(test_utils.BaseTestCase):
                                     for prio in itertools.chain.from_iterable(
                                         self.endpoints))))
 
-        dispatcher({}, msg)
+        try:
+            dispatcher({}, msg)
+        except Exception as ex:
+            self.assertFalse(self.success, ex)
+            self.assertIsNotNone(self.ex, ex)
+            self.assertIsInstance(ex, self.ex, ex)
+            if isinstance(ex, messaging.NoSuchMethod):
+                self.assertEqual(ex.method, self.method)
+        else:
+            self.assertTrue(self.success)
 
         # check endpoint callbacks are called or not
         for i, endpoint_methods in enumerate(self.endpoints):

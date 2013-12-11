@@ -19,6 +19,7 @@ import threading
 import mock
 import testscenarios
 
+from oslo import messaging
 from oslo.messaging._executors import impl_blocking
 from oslo.messaging._executors import impl_eventlet
 from tests import utils as test_utils
@@ -29,8 +30,12 @@ load_tests = testscenarios.load_tests_apply_scenarios
 class TestExecutor(test_utils.BaseTestCase):
 
     _scenarios = [
-        ('rpc', dict(sender_expects_reply=True)),
-        ('notify', dict(sender_expects_reply=False))
+        ('rpc', dict(sender_expects_reply=True,
+                     msg_action='acknowledge')),
+        ('notify_ack', dict(sender_expects_reply=False,
+                            msg_action='acknowledge')),
+        ('notify_requeue', dict(sender_expects_reply=False,
+                                msg_action='requeue')),
     ]
 
     _impl = [('blocking', dict(executor=impl_blocking.BlockingExecutor,
@@ -55,8 +60,12 @@ class TestExecutor(test_utils.BaseTestCase):
 
     def test_executor_dispatch(self):
         callback = mock.MagicMock(sender_expects_reply=
-                                  self.sender_expects_reply,
-                                  return_value='result')
+                                  self.sender_expects_reply)
+        if self.msg_action == 'acknowledge':
+            callback.return_value = 'result'
+        elif self.msg_action == 'requeue':
+            callback.side_effect = messaging.RequeueMessageException()
+
         listener = mock.Mock(spec=['poll'])
         executor = self.executor(self.conf, listener, callback)
 
@@ -76,7 +85,8 @@ class TestExecutor(test_utils.BaseTestCase):
 
         self._run_in_thread(executor)
 
-        incoming_message.acknowledge.assert_called_once_with()
+        msg_action_method = getattr(incoming_message, self.msg_action)
+        msg_action_method.assert_called_once_with()
         callback.assert_called_once_with({}, {'payload': 'data'})
         if self.sender_expects_reply:
             incoming_message.reply.assert_called_once_with('result')

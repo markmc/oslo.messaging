@@ -81,6 +81,14 @@ from oslo.messaging.notify import dispatcher as notify_dispatcher
 from oslo.messaging import server as msg_server
 
 
+class RequeueMessageException(Exception):
+    """Encapsulates an Requeue exception
+
+    Merely instantiating this exception will ask to the executor to
+    requeue the message
+    """
+
+
 def get_notification_listener(transport, targets, endpoints,
                               executor='blocking', serializer=None):
     """Construct a notification listener

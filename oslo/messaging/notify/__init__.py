@@ -15,7 +15,8 @@
 
 __all__ = ['Notifier',
            'LoggingNotificationHandler',
-           'get_notification_listener']
+           'get_notification_listener',
+           'RequeueMessageException']
 
 from .notifier import *
 from .listener import *
