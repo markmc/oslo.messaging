@@ -13,6 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import sys
+
 import eventlet
 from eventlet import greenpool
 import greenlet
@@ -40,8 +42,8 @@ class EventletExecutor(base.ExecutorBase):
     method waits for all message dispatch greenthreads to complete.
     """
 
-    def __init__(self, conf, listener, callback):
-        super(EventletExecutor, self).__init__(conf, listener, callback)
+    def __init__(self, conf, listener, dispatcher):
+        super(EventletExecutor, self).__init__(conf, listener, dispatcher)
         self.conf.register_opts(_eventlet_opts)
         self._thread = None
         self._greenpool = greenpool.GreenPool(self.conf.rpc_thread_pool_size)
@@ -55,7 +57,21 @@ class EventletExecutor(base.ExecutorBase):
             try:
                 while True:
                     incoming = self.listener.poll()
-                    self._greenpool.spawn_n(self.callback, incoming)
+
+                    dispatch_mgr = self.dispatcher(incoming)
+                    callback = mgr.__enter__()
+
+                    dispatch_thread = self._greenpool.spawn_n(callback)
+
+                    def dispatch_complete(dispatch_thread):
+                        try:
+                            dispatch_thread.wait()
+                        except:
+                            dispatch_mgr.__exit__(*sys.exc_info)
+                        else:
+                            dispatch_mgr.__exit__(None, None, None)
+
+                    dispatch_thread.link(dispatch_complete)
             except greenlet.GreenletExit:
                 return
 

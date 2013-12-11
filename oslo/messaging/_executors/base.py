@@ -24,10 +24,10 @@ from oslo import messaging
 @six.add_metaclass(abc.ABCMeta)
 class ExecutorBase(object):
 
-    def __init__(self, conf, listener, callback):
+    def __init__(self, conf, listener, dispatcher):
         self.conf = conf
         self.listener = listener
-        self.callback = callback
+        self.dispatcher = dispatcher
 
     @abc.abstractmethod
     def start(self):

@@ -75,7 +75,7 @@ class NotificationDispatcher(object):
             finally:
                 localcontext.clear_local_context()
 
-    def __call__(self, incoming):
+    def _dispatch_and_handle_error(self, incoming):
         """Dispatch a notification message to the appropriate endpoint method.
 
         :param incoming: the incoming notification message
@@ -89,3 +89,7 @@ class NotificationDispatcher(object):
             LOG.error('Exception during message handling',
                       exc_info=exc_info)
 
+    @contextlib.contextmanager
+    def __call__(self, incoming):
+        yield lambda: self._dispatch_and_handle_error(incoming)
+        incoming.acknowledge()

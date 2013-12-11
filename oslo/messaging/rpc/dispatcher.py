@@ -138,7 +138,7 @@ class RPCDispatcher(object):
         else:
             raise UnsupportedVersion(version)
 
-    def __call__(self, incoming):
+    def _dispatch_and_reply(self, incoming):
         """Dispatch an RPC message to the appropriate endpoint method.
 
         :param incoming: the incoming message to be dispatched
@@ -161,3 +161,8 @@ class RPCDispatcher(object):
             # between the current stack frame and the traceback in
             # exc_info.
             del exc_info
+
+    @contextlib.contextmanager
+    def __call__(self, incoming):
+        incoming.acknowledge()
+        yield lambda: self._dispatch_and_reply(incoming)
