@@ -68,7 +68,6 @@ class NotificationDispatcher(object):
 
         payload = self.serializer.deserialize_entity(ctxt,
                                                      message.get('payload'))
-
         for callback in self._callbacks_by_priority.get(priority, []):
             localcontext.set_local_context(ctxt)
             try:
